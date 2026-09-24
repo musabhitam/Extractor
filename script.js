@@ -21,7 +21,7 @@
     });
   })();
 
-  /*UPLOAD BOX */
+  /*UPLOAD BOX*/
 
   const fileInput = document.querySelector('.upload-box input[type="file"]');
   const uploadBox = document.querySelector('.upload-box');
@@ -29,7 +29,6 @@
   const uploadHint = document.querySelector('.upload-box__hint');
 
   if (fileInput && uploadBox) {
-    /* 1. Normal click-to-select */
     fileInput.addEventListener('change', function() {
       if (this.files && this.files[0]) {
         uploadBox.classList.add('has-file');
@@ -42,51 +41,20 @@
       }
     });
 
-    /* 2. Drag hover feedback */
     ['dragenter', 'dragover'].forEach(event => {
       uploadBox.addEventListener(event, (e) => {
         e.preventDefault();
-        e.stopPropagation();
         uploadBox.classList.add('has-file');
       });
     });
 
-    /* 3. Reset visual when dragging away */
-    ['dragleave', 'dragend'].forEach(event => {
+    ['dragleave', 'drop'].forEach(event => {
       uploadBox.addEventListener(event, (e) => {
         e.preventDefault();
-        e.stopPropagation();
         if (!fileInput.files.length) {
           uploadBox.classList.remove('has-file');
         }
       });
-    });
-
-    /* 4. Handle the actual DROP — assign dropped file to the input */
-    uploadBox.addEventListener('drop', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const files = e.dataTransfer.files;
-      if (files && files.length > 0) {
-        const file = files[0];
-
-        if (!file.name.toLowerCase().endsWith('.docx')) {
-          alert('Please drop a .docx file only.');
-          uploadBox.classList.remove('has-file');
-          return;
-        }
-
-        /* Put the file into the hidden file input */
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-
-        /* Update UI */
-        uploadBox.classList.add('has-file');
-        uploadText.textContent = file.name;
-        uploadHint.textContent = 'Ready to extract';
-      }
     });
   }
 
@@ -228,12 +196,14 @@
       const boxes = document.querySelectorAll('#bulkDeleteForm input[type="checkbox"]:not(#selectAll)');
       boxes.forEach(box => {
         const item = box.closest('.folder__item');
+        // Only toggle visible items (not hidden by search)
         if (item && item.style.display !== 'none') {
           box.checked = this.checked;
         }
       });
     });
 
+    // Uncheck "Select All" if any visible checkbox is unchecked
     document.querySelectorAll('#bulkDeleteForm input[type="checkbox"]:not(#selectAll)').forEach(box => {
       box.addEventListener('change', function() {
         const visibleBoxes = Array.from(document.querySelectorAll('#bulkDeleteForm input[type="checkbox"]:not(#selectAll)'))
