@@ -21,7 +21,7 @@
     });
   })();
 
-  /*UPLOAD BOX (with working DRAG & DROP)*/
+  /*UPLOAD BOX (wit DRAG & DROP)*/
 
   const fileInput = document.querySelector('.upload-box input[type="file"]');
   const uploadBox = document.querySelector('.upload-box');
