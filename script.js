@@ -48,13 +48,42 @@
       });
     });
 
-    ['dragleave', 'drop'].forEach(event => {
+       /* 3. Reset visual when dragging away */
+    ['dragleave', 'dragend'].forEach(event => {
       uploadBox.addEventListener(event, (e) => {
         e.preventDefault();
+        e.stopPropagation();
         if (!fileInput.files.length) {
           uploadBox.classList.remove('has-file');
         }
       });
+    });
+
+    /* 4. Handle the actual DROP — assign dropped file to the input */
+    uploadBox.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        const file = files[0];
+
+        if (!file.name.toLowerCase().endsWith('.docx')) {
+          alert('Please drop a .docx file only.');
+          uploadBox.classList.remove('has-file');
+          return;
+        }
+
+        /* Put the file into the hidden file input */
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+
+        /* Update UI */
+        uploadBox.classList.add('has-file');
+        uploadText.textContent = file.name;
+        uploadHint.textContent = 'Ready to extract';
+      }
     });
   }
 
