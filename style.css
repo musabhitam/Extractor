@@ -559,6 +559,16 @@ body,
   font-family:var(--mono);
   table-layout:fixed;
 }
+
+.data-table col:nth-child(1){ width:60px; }   
+.data-table col:nth-child(2){ width:180px; }   
+.data-table col:nth-child(3){ width:160px; }   
+.data-table col:nth-child(4){ width:auto; }    
+.data-table col:nth-child(5){ width:200px; }   
+.data-table col:nth-child(6){ width:120px; }   
+.data-table col:nth-child(7){ width:80px; }    
+.data-table col:nth-child(8){ width:90px; } 
+   
 .data-table th{
   text-align:left;
   padding:16px 20px;
@@ -574,15 +584,7 @@ body,
   overflow:hidden;
   text-overflow:ellipsis;
 }
-.data-table td{
-  padding:14px 20px;
-  color:var(--text-dim);
-  border-bottom:1px solid var(--border);
-  vertical-align:top;
-  line-height:1.7;
-  overflow-wrap:break-word;
-  word-break:break-word;
-}
+
 .data-table tr:last-child td{ border-bottom:none; }
 
 /*DATA ROW CLICKABLE*/
