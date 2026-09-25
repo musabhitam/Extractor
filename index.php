@@ -275,6 +275,9 @@ if ($currentXlsx !== '') {
 
     <div class="table-wrap">
       <table class="data-table">
+        <colgroup>
+          <col><col><col><col><col><col><col><col>
+        </colgroup>
         <thead>
           <tr>
             <th>ID</th>
