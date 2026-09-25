@@ -21,6 +21,11 @@
   --success: #8ed058;
   --danger: #e05a4a;
   --shadow: rgba(0,0,0,0.5);
+
+  /* OFFLINE MONOSPACE FONT STACK
+     Browser picks the first font installed on the user's OS.
+     No internet required — all are system fonts. */
+  --mono: 'Consolas','Menlo','Monaco','DejaVu Sans Mono','Liberation Mono','Lucida Console','Courier New',monospace;
 }
 
 [data-theme="light"] {
@@ -58,7 +63,7 @@ html{
 body{
   background:var(--bg);
   color:var(--text);
-  font-family:'JetBrains Mono','Courier New',monospace;
+  font-family:var(--mono);
   font-size:15px;
   line-height:1.7;
   -webkit-font-smoothing:antialiased;
@@ -80,7 +85,7 @@ body{
 }
 a{color:inherit;text-decoration:none}
 code{
-  font-family:'JetBrains Mono','Courier New',monospace;
+  font-family:var(--mono);
   font-size:0.9em;
   color:var(--code-text);
   background:var(--code-bg);
@@ -159,7 +164,7 @@ body,
   max-width:100%;
 }
 .nav__logo{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-weight:700;
   font-size:17px;
   letter-spacing:0.05em;
@@ -180,7 +185,7 @@ body,
 .nav__links{
   display:flex;
   gap:36px;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:12px;
   letter-spacing:0.15em;
   text-transform:uppercase;
@@ -344,7 +349,7 @@ body,
   overflow:hidden;
 }
 .section__eyebrow{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.3em;
   text-transform:uppercase;
@@ -395,7 +400,7 @@ body,
   font-size:0.95rem;
   border:1px solid;
   border-left:4px solid;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   animation:fadeInUp .4s ease both;
   word-wrap:break-word;
 }
@@ -479,11 +484,11 @@ body,
   font-size:1.1rem;
   color:var(--text);
   margin-bottom:10px;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   letter-spacing:0.02em;
 }
 .upload-box__hint{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.2em;
   text-transform:uppercase;
@@ -511,7 +516,7 @@ body,
   color:var(--btn-text);
   border:2px solid var(--btn-bg);
   border-radius:3px;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:12px;
   font-weight:700;
   letter-spacing:0.2em;
@@ -536,13 +541,6 @@ body,
 }
 .btn-primary:hover span{ transform:translateX(6px); }
 
-/* ============================================================
-   FIXED: DATA TABLE
-   - .table-wrap now uses overflow-x:hidden (no horizontal scrollbar)
-   - .data-table now uses table-layout:fixed so the 8 columns share
-     the available width evenly instead of pushing off-screen
-   - cells wrap long text with word-break
-   ============================================================ */
 .table-wrap{
   overflow-x:hidden;
   border:2px solid var(--border);
@@ -558,14 +556,14 @@ body,
   width:100%;
   border-collapse:collapse;
   font-size:0.9rem;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   table-layout:fixed;
 }
 .data-table th{
   text-align:left;
   padding:16px 20px;
   background:var(--bg-hover);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.15em;
   text-transform:uppercase;
@@ -634,7 +632,7 @@ body,
 .folder__head:hover .folder__dot{ transform:scale(1.3); }
 .folder__dot--muted{ background:var(--text-faint); }
 .folder__title{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:13px;
   font-weight:700;
   letter-spacing:0.1em;
@@ -684,7 +682,7 @@ body,
   transition:color .2s ease;
   cursor:pointer;
   text-decoration:none;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   white-space:normal;
   overflow-wrap:break-word;
   word-break:break-word;
@@ -706,7 +704,7 @@ body,
   margin-bottom:18px;
 }
 .folder__subtitle{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:13px;
   font-weight:700;
   letter-spacing:0.1em;
@@ -723,7 +721,7 @@ body,
   border:1px solid var(--border);
   border-radius:3px;
   color:var(--text);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:0.9rem;
   outline:none;
   transition:all .3s cubic-bezier(.22,1,.36,1);
@@ -768,7 +766,7 @@ body,
   border-radius:3px;
   border:1px solid var(--border);
   background:var(--bg-elev);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.15em;
   text-transform:uppercase;
@@ -880,7 +878,7 @@ body,
   border:2px solid var(--border-strong);
   background:var(--bg-elev);
   color:var(--text-muted);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   font-weight:700;
   letter-spacing:0.1em;
@@ -961,7 +959,7 @@ body,
   align-items:center;
   justify-content:center;
   transition:all .3s cubic-bezier(.22,1,.36,1);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-weight:700;
 }
 .modal__close:hover{
@@ -971,7 +969,7 @@ body,
   transform:rotate(90deg);
 }
 .modal__eyebrow{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.3em;
   text-transform:uppercase;
@@ -1002,7 +1000,7 @@ body,
   min-width:0;
 }
 .modal__label{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.2em;
   text-transform:uppercase;
@@ -1015,11 +1013,11 @@ body,
   word-wrap:break-word;
   word-break:break-word;
   white-space:pre-wrap;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   max-width:100%;
 }
 .modal__value--code{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:0.85rem;
   background:var(--bg-elev);
   padding:18px 22px;
@@ -1036,7 +1034,7 @@ body,
   background:transparent;
   border:1px solid var(--border-strong);
   border-radius:3px;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:10px;
   letter-spacing:0.1em;
   color:var(--accent);
@@ -1079,7 +1077,7 @@ body.modal-open{ overflow:hidden; }
   margin-bottom:80px;
 }
 .footer__brand h4{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:1.25rem;
   font-weight:700;
   letter-spacing:0.05em;
@@ -1095,7 +1093,7 @@ body.modal-open{ overflow:hidden; }
   max-width:320px;
 }
 .footer__col h5{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.25em;
   text-transform:uppercase;
@@ -1113,7 +1111,7 @@ body.modal-open{ overflow:hidden; }
   font-size:0.9rem;
   color:var(--text-muted);
   transition:all .3s ease;
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   display:inline-block;
 }
 .footer__col a:hover{
@@ -1131,7 +1129,7 @@ body.modal-open{ overflow:hidden; }
   align-items:center;
   padding-top:40px;
   border-top:1px solid var(--border);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.2em;
   text-transform:uppercase;
@@ -1152,7 +1150,7 @@ body.modal-open{ overflow:hidden; }
   max-width:640px;
 }
 .upload-select__label{
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:11px;
   letter-spacing:0.2em;
   text-transform:uppercase;
@@ -1165,7 +1163,7 @@ body.modal-open{ overflow:hidden; }
   border:2px solid var(--border-strong);
   border-radius:3px;
   color:var(--text);
-  font-family:'JetBrains Mono',monospace;
+  font-family:var(--mono);
   font-size:0.95rem;
   cursor:pointer;
   outline:none;
