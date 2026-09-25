@@ -1,636 +1,609 @@
 <?php
 
+// Config
 $categoryFile = __DIR__ . '/.selected_category';
-if (file_exists($categoryFile)) {
-    $HARDCODED_CATEGORY = trim(file_get_contents($categoryFile));
-} else {
-    $HARDCODED_CATEGORY = 'uncategorized';
-}
+$category = file_exists($categoryFile) ? trim(file_get_contents($categoryFile)) : 'uncategorized';
+$hardcodedDocument = '';
+$debug = true;
 
-// AUTO-DETECT VERSION FROM FILENAME
-function autoDetectVersion(string $filename): string
-{
-    // 1. Try to find a date pattern like 20260921 or 2026-09-21
-    if (preg_match('/(20\d{2})[-_]?(\d{2})[-_]?(\d{2})/', $filename, $m)) {
-        return $m[1] . '-' . $m[2] . '-' . $m[3];   
-    }
-
-    // 2. Try to find a year pattern like 2026 or 2025
-    if (preg_match('/(20\d{2})/', $filename, $m)) {
-        return $m[1];                            
-    }
-
-    // 3. Fall back to today's date
-    return date('Y-m-d');
-}
-
-// DATABASE CONFIGURATION
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
 define('DB_NAME', 'knowledge_based');
 define('DEFAULT_STATUS', 'extracted');
+define('TABLES_INSIDE_SECTION', true);
 
-// CREATE DATABASE & TABLE
-$conn = new mysqli(DB_HOST, DB_USER, DB_PASS);
-if ($conn->connect_error) {
-    die("❌ Database connection failed: " . $conn->connect_error . PHP_EOL);
+$columns = ['id', 'document_name', 'section', 'chunk_text', 'keywords', 'category', 'version', 'status'];
+$folder = __DIR__;
+const EXCEL_CELL_LIMIT = 32000;
+
+function detectVersion(string $filename): string
+{
+    if (preg_match('/(20\d{2})[-_]?(\d{2})[-_]?(\d{2})/', $filename, $m)) return "$m[1]-$m[2]-$m[3]";
+    if (preg_match('/(20\d{2})/', $filename, $m)) return $m[1];
+    return date('Y-m-d');
 }
-echo "✅ Connected to MySQL successfully!" . PHP_EOL;
 
+// DB setup
+$conn = new mysqli(DB_HOST, DB_USER, DB_PASS);
+if ($conn->connect_error) die("❌ DB: {$conn->connect_error}\n");
 $conn->query("CREATE DATABASE IF NOT EXISTS " . DB_NAME);
 $conn->select_db(DB_NAME);
-echo "✅ Database '" . DB_NAME . "' ready!" . PHP_EOL;
-
-$sql = "CREATE TABLE IF NOT EXISTS documents (
+$conn->query("CREATE TABLE IF NOT EXISTS documents (
     id INT AUTO_INCREMENT PRIMARY KEY,
     document_name VARCHAR(255),
     section VARCHAR(255),
-    chunk_text TEXT,
+    chunk_text MEDIUMTEXT,
     keywords TEXT,
     category VARCHAR(100),
     version VARCHAR(255),
     status VARCHAR(50)
-)";
-if ($conn->query($sql) === TRUE) {
-    echo "✅ Table 'documents' ready!" . PHP_EOL;
-} else {
-    echo "❌ Error creating table: " . $conn->error . PHP_EOL;
-}
+)");
 $conn->close();
+echo "✅ Database ready\n";
 
-// COLUMNS FOR EXCEL
-$COLUMNS = [
-    'id',
-    'document_name',
-    'section',
-    'chunk_text',
-    'keywords',
-    'category',
-    'version',
-    'status',
-];
-
-// FOLDER PATH
-$folder = __DIR__;
-
-// ============================================
-// DOCXPARSER CLASS
-// ============================================
+// Docx Parser
 class DocxParser
 {
-    private const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
-    private $stopwords = [
-        'the', 'and', 'for', 'shall', 'this', 'that', 'with', 'from', 'all', 'any',
-        'may', 'will', 'must', 'have', 'has', 'been', 'are', 'were', 'is', 'was',
-        'be', 'to', 'of', 'in', 'on', 'at', 'by', 'as', 'or', 'a', 'an', 'it', 'its',
-        'their', 'them', 'they', 'such', 'which', 'who', 'where', 'when', 'how', 'but',
-        'not', 'no', 'yes', 'include', 'including', 'included', 'set', 'out', 'under',
-        'over', 'per', 'one', 'two', 'three', 'first', 'second', 'third', 'new', 'old',
-        'etc', 'ie', 'eg', 'i.e', 'e.g',
+    // Any of these wrappers can appear between any two logical elements
+    // (paragraph, table, row, cell).It always look "through" them.
+    const WRAPPERS = [
+        'sdt', 'sdtContent',
+        'customXml', 'ins', 'smartTag',
+        'drawing', 'pict', 'txbx', 'txbxContent', 'shape', 'textbox',
+        'AlternateContent', 'Choice', 'Fallback',
     ];
+
+    // Words to ignore when generating keywords
+    private $stopwords;
 
     public function __construct()
     {
-        $this->stopwords = array_flip($this->stopwords);
+        $this->stopwords = array_flip([
+            'the','and','for','shall','this','that','with','from','all','any',
+            'may','will','must','have','has','been','are','were','is','was',
+            'be','to','of','in','on','at','by','as','or','a','an','it','its',
+            'their','them','they','such','which','who','where','when','how','but',
+            'not','no','yes','include','including','included','set','out','under',
+            'over','per','one','two','three','first','second','third','new','old',
+        ]);
     }
 
-    public function parse(string $path, string $documentName, string $category, string $version): array
+    public function parse(string $path, string $docName, string $category, string $version): array
     {
-        $xml = $this->readDocumentXml($path);
-        if ($xml === null) {
-            return [];
-        }
+        //docx zip file
+        $zip = new ZipArchive();
+        if ($zip->open($path) !== true) return [];
 
+        $chunks = [];
+        $mainXml = $zip->getFromName('word/document.xml');
+        if ($mainXml !== false) {
+            $chunks = $this->parseXml($mainXml, $docName, $category, $version);
+        }
+        $zip->close();
+
+        // Post-process each chunk: generate keywords + set status
+        foreach ($chunks as &$c) {
+            $c['keywords'] = $this->keywords($c['chunk_text'], $c['section']);
+            $c['status'] = DEFAULT_STATUS;
+        }
+        return $chunks;
+    }
+
+    private function parseXml(string $xml, string $docName, string $category, string $version): array
+    {
+         // Load the Word XML into a DOM
         $dom = new DOMDocument();
         libxml_use_internal_errors(true);
         $dom->loadXML($xml);
         libxml_clear_errors();
 
-        $xpath = new DOMXPath($dom);
-        $xpath->registerNamespace('w', self::NS);
+        // XPath with the "w:" namespace registered
+        $xp = new DOMXPath($dom);
+        $xp->registerNamespace('w', self::NS);
+
+        // Find the <w:body> element (top-level container)
+        $root = $xp->query('//w:body')->item(0);
+        if ($root === null) return [];
 
         $chunks = [];
-        $currentSection = 'General';
-        $currentTexts = [];
+        $section = 'General';
+        $buffer = [];
+        $termsStarted = false; //true if jumpa first heading
+        $sectionHasHeading = false;
 
-        $flush = function () use (&$chunks, &$currentSection, &$currentTexts, $documentName, $category, $version) {
-            $text = $this->cleanText(implode("\n", $currentTexts));
-            if ($text !== '') {
+        $flush = function () use (&$chunks, &$buffer, &$section, &$sectionHasHeading, $docName, $category, $version) {
+            $text = $this->cleanText(implode("\n", $buffer));
+            if ($text !== '' || $sectionHasHeading) {
                 $chunks[] = [
-                    'document_name' => $documentName,
-                    'section' => $currentSection,
+                    'document_name' => $docName,
+                    'section' => $section,
                     'chunk_text' => $text,
                     'category' => $category,
                     'version' => $version,
                 ];
             }
-            $currentTexts = [];
+            $buffer = [];
+            $sectionHasHeading = false;
         };
 
-        $paragraphs = $xpath->query('//w:body/w:p');
-        foreach ($paragraphs as $para) {
-            $style = $this->getStyle($xpath, $para);
-            $text = $this->paragraphText($xpath, $para);
-            $text = trim($text);
-            if ($text === '' || $this->isToc($style)) {
+        $tableChunks = [];
+
+        foreach ($this->collectBlocks($root) as $node) {
+            if ($node->localName === 'tbl') {
+                if (!TABLES_INSIDE_SECTION) {
+                    $t = $this->cleanText($this->tableText($xp, $node));
+                    if ($t !== '') $tableChunks[] = $t;
+                    continue;
+                }
+                $rowLines = [];
+                foreach ($this->tableRows($xp, $node) as $cells) {
+                    if (count($cells) === 1 && $this->isAttachmentHeading($cells[0])) {
+                        if ($rowLines) { $buffer[] = implode("\n", $rowLines); $rowLines = []; }
+                        $flush();
+                        $termsStarted = true;
+                        $section = $this->cleanSection($cells[0]);
+                        $sectionHasHeading = true;
+                        continue;
+                    }
+                    $rowLines[] = implode(' | ', $cells);
+                }
+                if ($rowLines) $buffer[] = $this->cleanText(implode("\n", $rowLines));
                 continue;
             }
-            if ($this->isHeading($style)) {
+
+            if ($node->localName !== 'p') continue;
+
+            $style = $this->getStyle($xp, $node);
+            $text = trim($this->paragraphText($xp, $node));
+            if ($text === '' || ($style !== null && stripos($style, 'toc') !== false)) continue;
+
+            if (mb_strlen($text) < 80 && preg_match('/^[\-\x{2013}\x{2014}\s]*END\s+OF\s+(CHAPTER|PART|DOCUMENT)\b/iu', $text)) {
                 $flush();
-                $currentSection = $this->cleanSection($text);
+                $section = 'General';
                 continue;
             }
-            $currentTexts[] = $text;
+
+            if ($this->isHeading($style, $text, $termsStarted, $this->outlineLevel($xp, $node), $this->isListItem($xp, $node))) {
+                $flush();
+                $termsStarted = true;
+                $section = $this->cleanSection($text);
+                $sectionHasHeading = true;
+                continue;
+            }
+            $buffer[] = $text;
         }
         $flush();
 
-        $tables = $xpath->query('//w:body/w:tbl');
-        $idx = 1;
-        foreach ($tables as $table) {
-            $tableText = $this->tableText($xpath, $table);
-            $tableText = $this->cleanText($tableText);
-            if ($tableText !== '') {
-                $chunks[] = [
-                    'document_name' => $documentName,
-                    'section' => 'Table ' . $idx,
-                    'chunk_text' => $tableText,
-                    'category' => $category,
-                    'version' => $version,
-                ];
-                $idx++;
-            }
+        foreach ($tableChunks as $i => $t) {
+            $chunks[] = [
+                'document_name' => $docName,
+                'section' => 'Table ' . ($i + 1),
+                'chunk_text' => $t,
+                'category' => $category,
+                'version' => $version,
+            ];
         }
-
-        foreach ($chunks as &$chunk) {
-            $chunk['keywords'] = $this->extractKeywords($chunk['chunk_text'], $chunk['section']);
-            $chunk['status'] = DEFAULT_STATUS;
-        }
-        unset($chunk);
-
         return $chunks;
     }
 
-    private function readDocumentXml(string $path): ?string
+    // Paragraphs and tables in document order, looking through every wrapper
+    private function collectBlocks(DOMNode $parent): array
     {
-        $zip = new ZipArchive();
-        if ($zip->open($path) !== true) {
-            return null;
+        $out = [];
+        foreach ($parent->childNodes as $child) {
+            if ($child->nodeType !== XML_ELEMENT_NODE) continue;
+            $name = $child->localName;
+            if ($name === 'p' || $name === 'tbl') {
+                $out[] = $child;
+            } elseif (in_array($name, self::WRAPPERS, true)) {
+                $out = array_merge($out, $this->collectBlocks($child));
+            }
         }
-        $xml = $zip->getFromName('word/document.xml');
-        $zip->close();
-        return $xml === false ? null : $xml;
+        return $out;
     }
 
-    private function getStyle(DOMXPath $xpath, DOMNode $para): ?string
+    // Find children named $target through ANY wrapper depth
+    private function elementChildren(DOMNode $parent, string $target): array
     {
-        $nodes = $xpath->query('.//w:pPr/w:pStyle', $para);
-        if ($nodes->length === 0) {
-            return null;
+        $out = [];
+        foreach ($parent->childNodes as $child) {
+            if ($child->nodeType !== XML_ELEMENT_NODE) continue;
+            $name = $child->localName;
+            if ($name === $target) {
+                $out[] = $child;
+            } elseif (in_array($name, self::WRAPPERS, true)) {
+                $out = array_merge($out, $this->elementChildren($child, $target));
+            }
         }
-        $val = $nodes->item(0)->getAttribute('w:val');
-        return $val !== '' ? $val : null;
+        return $out;
     }
 
-    private function isHeading(?string $style): bool
-    {
-        if ($style === null) return false;
-        $style = strtolower($style);
-        return in_array($style, ['heading1', 'partheading'], true);
-    }
-
-    private function isToc(?string $style): bool
-    {
-        return $style !== null && stripos($style, 'toc') !== false;
-    }
-
-    private function paragraphText(DOMXPath $xpath, DOMNode $para): string
-    {
-        $nodes = $xpath->query('.//w:t', $para);
-        $parts = [];
-        foreach ($nodes as $node) {
-            $parts[] = $node->nodeValue;
-        }
-        return implode('', $parts);
-    }
-
-    private function tableText(DOMXPath $xpath, DOMNode $table): string
+    private function tableRows(DOMXPath $xp, DOMNode $table): array
     {
         $rows = [];
-        foreach ($xpath->query('.//w:tr', $table) as $row) {
+        foreach ($this->elementChildren($table, 'tr') as $row) {
             $cells = [];
-            foreach ($xpath->query('.//w:tc', $row) as $cell) {
-                $cellText = trim($this->paragraphText($xpath, $cell));
-                if ($cellText !== '') {
-                    $cells[] = $cellText;
-                }
+            foreach ($this->elementChildren($row, 'tc') as $cell) {
+                $t = $this->cellText($xp, $cell);
+                if ($t !== '') $cells[] = $t;
             }
-            if (!empty($cells)) {
-                $rows[] = implode(' | ', $cells);
-            }
+            if ($cells) $rows[] = $cells;
         }
-        return implode("\n", $rows);
+        return $rows;
     }
 
+    // Extract text from a cell, flattening nested tables and wrappers
+    private function cellText(DOMXPath $xp, DOMNode $cell): string
+    {
+        $parts = [];
+        foreach ($cell->childNodes as $child) {
+            if ($child->nodeType !== XML_ELEMENT_NODE) continue;
+            $n = $child->localName;
+
+            if ($n === 'p') {
+                $t = trim($this->paragraphText($xp, $child));
+                if ($t !== '') $parts[] = $t;
+            } elseif ($n === 'tbl') {
+                foreach ($this->tableRows($xp, $child) as $nested) {
+                    $parts[] = implode(' | ', $nested);
+                }
+            } elseif (in_array($n, self::WRAPPERS, true)) {
+                $sub = $this->cellText($xp, $child);
+                if ($sub !== '') $parts[] = $sub;
+            }
+        }
+        return $this->normalizeSpaces(implode(' ', $parts));
+    }
+
+    private function normalizeSpaces(string $text): string
+    {
+        if (strlen($text) > 500000) {
+            $r = preg_replace('/[ \t\r\n]+/', ' ', $text);
+            return trim($r ?? $text);
+        }
+        $r = preg_replace('/\s+/u', ' ', $text);
+        return trim($r ?? $text);
+    }
+
+    private function tableText(DOMXPath $xp, DOMNode $table): string
+    {
+        $lines = [];
+        foreach ($this->tableRows($xp, $table) as $cells) {
+            $lines[] = implode(' | ', $cells);
+        }
+        return implode("\n", $lines);
+    }
+
+    // ------------------------------------------------------------------
+
+    private function getStyle(DOMXPath $xp, DOMNode $p): ?string
+    {
+        $n = $xp->query('.//w:pPr/w:pStyle', $p);
+        if ($n->length === 0) return null;
+        $v = $n->item(0)->getAttribute('w:val');
+        return $v !== '' ? $v : null;
+    }
+
+    private function isListItem(DOMXPath $xp, DOMNode $p): bool
+    {
+        return $xp->query('./w:pPr/w:numPr', $p)->length > 0;
+    }
+
+    private function outlineLevel(DOMXPath $xp, DOMNode $p): ?string
+    {
+        $n = $xp->query('./w:pPr/w:outlineLvl', $p);
+        return $n->length > 0 ? $n->item(0)->getAttribute('w:val') : null;
+    }
+
+    private function isHeading(?string $style, string $text, bool $started, ?string $outline, bool $listItem): bool
+    {
+        if (preg_match('/^\d+\s*\.\s*\d/', $text)) return false;
+        if ($this->isAttachmentHeading($text) && !$listItem) return true;
+        if ($style !== null && strtolower($style) === 'heading1') return true;
+
+        if ($started && $outline === '0' && mb_strlen($text) < 200
+            && $text === mb_strtoupper($text) && preg_match('/[A-Z]{3}/', $text)) return true;
+
+        return $started && mb_strlen($text) < 200
+            && preg_match('/^\d{1,2}(?!\d)\s*\.?\s*[A-Z]{2,}/', $text) === 1;
+    }
+
+    private function isAttachmentHeading(string $text): bool
+    {
+        return mb_strlen($text) < 150
+            && preg_match('/^(Attachment|Appendix)\s+[A-Za-z]?\d+\s*[\x{2013}\x{2014}\-:]/iu', $text) === 1;
+    }
+
+    private function paragraphText(DOMXPath $xp, DOMNode $p): string
+    {
+        $nodes = $xp->query('.//w:r/w:t | .//w:r/w:tab | .//w:r/w:br', $p);
+        $parts = [];
+        foreach ($nodes as $n) {
+            if ($n->localName === 't') $parts[] = $n->nodeValue;
+            elseif ($n->localName === 'tab') $parts[] = "\t";
+            elseif ($n->localName === 'br' && $n->getAttribute('w:type') !== 'page') $parts[] = "\n";
+        }
+        return str_replace("\xC2\xA0", ' ', implode('', $parts));
+    }
+
+    //KEYWORDS
+    // Removes empty lines and trims, preserving intentional newlines
     private function cleanText(string $text): string
     {
-        $lines = explode("\n", $text);
-        $cleaned = [];
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line !== '') {
-                $cleaned[] = $line;
-            }
+        $out = [];
+        foreach (explode("\n", $text) as $line) {
+            $line = trim(preg_replace('/[ \t]*\t[ \t]*/', "\t", $line));
+            if ($line !== '') $out[] = $line;
         }
-        return implode("\n", $cleaned);
+        return implode("\n", $out);
     }
 
+    // Cleans up a heading before using it as a section name
     private function cleanSection(string $text): string
     {
-        $text = trim($text);
+        $text = trim($this->normalizeSpaces($text));
         $text = preg_replace('/[\.\s]+$/', '', $text);
         $text = preg_replace('/\s+\d+$/', '', $text);
-        $text = str_replace("\t", ' ', $text);
+        $text = preg_replace('/^(\d{1,2})\s*\.?\s*(?=[A-Z])/', '$1. ', $text);
         return trim($text);
     }
 
-    private function extractKeywords(string $text, string $section, int $topN = 8): string
+    // Generates a comma-separated keyword string by:
+    private function keywords(string $text, string $section, int $topN = 8): string
     {
-        $blob = $section . ' ' . $text;
-
-        preg_match_all('/\b[a-zA-Z]{3,}\b/', mb_strtolower($blob), $m);
-        $words = array_filter($m[0], function ($w) {
-            return !isset($this->stopwords[$w]) && mb_strlen($w) > 2;
-        });
+        preg_match_all('/\b[a-zA-Z]{3,}\b/', mb_strtolower($section . ' ' . $text), $m);
+        $words = array_filter($m[0], fn($w) => !isset($this->stopwords[$w]));
         $freq = array_count_values($words);
         arsort($freq);
-        $top = array_slice(array_keys($freq), 0, $topN);
 
         preg_match_all('/\b[A-Z][A-Z0-9]{1,5}\b/', $text, $am);
-        $acronyms = array_unique($am[0]);
 
         $sectionWords = [];
         preg_match_all('/\b[a-zA-Z]{3,}\b/', mb_strtolower($section), $sm);
         foreach ($sm[0] as $w) {
-            if (!isset($this->stopwords[$w]) && mb_strlen($w) > 2) {
-                $sectionWords[] = $w;
-            }
+            if (!isset($this->stopwords[$w])) $sectionWords[] = $w;
         }
 
-        $merged = array_unique(array_merge($sectionWords, $acronyms, $top));
-        $merged = array_slice($merged, 0, 12);
-        $merged = array_map('mb_strtolower', $merged);
-        return implode(', ', $merged);
+        $merged = array_slice(array_unique(array_merge($sectionWords, $am[0], array_keys($freq))), 0, 12);
+        return implode(', ', array_map('mb_strtolower', $merged));
     }
 }
 
-// ============================================
-// DATABASE EXPORTER CLASS
-// ============================================
-class DatabaseExporter
+// DB writer
+class DbWriter
 {
     private $conn;
 
-    public function __construct($host, $user, $pass, $dbname)
+    public function __construct()
     {
-        $this->conn = new mysqli($host, $user, $pass);
-        if ($this->conn->connect_error) {
-            die("❌ Database connection failed: " . $this->conn->connect_error . PHP_EOL);
-        }
-        echo "✅ Connected to MySQL successfully!" . PHP_EOL;
-        $this->conn->select_db($dbname);
-        echo "✅ Database '$dbname' selected!" . PHP_EOL;
+        $this->conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+        if ($this->conn->connect_error) die("❌ DB: {$this->conn->connect_error}\n");
+        $this->conn->set_charset('utf8mb4');
     }
 
-    public function save($records)
+    public function deleteDocument(string $name): int
     {
-        $stmt = $this->conn->prepare("INSERT INTO documents (document_name, section, chunk_text, keywords, category, version, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        if (!$stmt) {
-            echo "❌ Error preparing statement: " . $this->conn->error . PHP_EOL;
-            return 0;
-        }
-        $count = 0;
-        foreach ($records as $record) {
-            $stmt->bind_param("sssssss",
-                $record['document_name'],
-                $record['section'],
-                $record['chunk_text'],
-                $record['keywords'],
-                $record['category'],
-                $record['version'],
-                $record['status']
-            );
-            if ($stmt->execute()) {
-                $count++;
-            }
-        }
-        $stmt->close();
-        return $count;
+        $s = $this->conn->prepare("DELETE FROM documents WHERE document_name = ?");
+        $s->bind_param("s", $name);
+        $s->execute();
+        $n = $s->affected_rows;
+        $s->close();
+        return max(0, $n);
     }
 
-    public function close()
+    // Inserts every chunk as a row
+    public function save(array $records): int
     {
-        if ($this->conn) {
-            $this->conn->close();
+        $s = $this->conn->prepare("INSERT INTO documents (document_name, section, chunk_text, keywords, category, version, status) VALUES (?,?,?,?,?,?,?)");
+        $n = 0;
+        foreach ($records as $r) {
+            $s->bind_param("sssssss",
+                $r['document_name'], $r['section'], $r['chunk_text'], $r['keywords'],
+                $r['category'], $r['version'], $r['status']);
+            if ($s->execute()) $n++;
         }
+        $s->close();
+        return $n;
     }
+
+    public function close() { $this->conn->close(); }
 }
 
-// EXCEL EXPORTER CLASS
-class XlsxExporter
+// XLSX writer
+class Xlsx
 {
-    public static function write(array $records, string $outputPath, array $columns): string
+    public static function write(array $records, string $path, array $columns): void
     {
-        $tempDir = sys_get_temp_dir() . '/kb_export_' . uniqid();
-        mkdir($tempDir, 0777, true);
+        $dir = sys_get_temp_dir() . '/kb_' . uniqid();
+        mkdir($dir . '/_rels', 0777, true);
+        mkdir($dir . '/xl/_rels', 0777, true);
+        mkdir($dir . '/xl/worksheets', 0777, true);
 
-        self::writeContentTypes($tempDir);
-        self::writeRootRels($tempDir);
-        self::writeWorkbook($tempDir);
-        self::writeWorkbookRels($tempDir);
-        self::writeStyles($tempDir);
-        self::writeSheet($tempDir, $records, $columns);
+        file_put_contents("$dir/[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '</Types>');
 
-        self::zipDirectory($tempDir, $outputPath);
-        self::recursiveRemove($tempDir);
+        file_put_contents("$dir/_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '</Relationships>');
 
-        return $outputPath;
-    }
+        file_put_contents("$dir/xl/workbook.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<sheets><sheet name="knowledge_base" sheetId="1" r:id="rId1"/></sheets></workbook>');
 
-    private static function writeContentTypes(string $dir): void
-    {
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' . "\n";
-        $xml .= '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' . "\n";
-        $xml .= '  <Default Extension="xml" ContentType="application/xml"/>' . "\n";
-        $xml .= '  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' . "\n";
-        $xml .= '  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' . "\n";
-        $xml .= '  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' . "\n";
-        $xml .= '</Types>';
-        file_put_contents($dir . '/[Content_Types].xml', $xml);
-    }
+        file_put_contents("$dir/xl/_rels/workbook.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '</Relationships>');
 
-    private static function writeRootRels(string $dir): void
-    {
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' . "\n";
-        $xml .= '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' . "\n";
-        $xml .= '</Relationships>';
-        @mkdir($dir . '/_rels');
-        file_put_contents($dir . '/_rels/.rels', $xml);
-    }
+        file_put_contents("$dir/xl/styles.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<fonts count="1"><font><name val="Calibri"/><sz val="11"/></font></fonts>'
+            . '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+            . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            . '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            . '</styleSheet>');
 
-    private static function writeWorkbook(string $dir): void
-    {
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' . "\n";
-        $xml .= '  <sheets><sheet name="knowledge_base" sheetId="1" r:id="rId1"/></sheets>' . "\n";
-        $xml .= '</workbook>';
-        @mkdir($dir . '/xl');
-        file_put_contents($dir . '/xl/workbook.xml', $xml);
-    }
+        $lastCol = self::col(count($columns));
+        $lastRow = count($records) + 1;
+        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . "<dimension ref=\"A1:$lastCol$lastRow\"/>"
+            . '<cols><col min="1" max="' . count($columns) . '" width="22"/></cols><sheetData>';
 
-    private static function writeWorkbookRels(string $dir): void
-    {
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' . "\n";
-        $xml .= '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' . "\n";
-        $xml .= '  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' . "\n";
-        $xml .= '</Relationships>';
-        @mkdir($dir . '/xl/_rels');
-        file_put_contents($dir . '/xl/_rels/workbook.xml.rels', $xml);
-    }
+        $xml .= '<row r="1">';
+        foreach ($columns as $i => $h) $xml .= self::cell(self::col($i + 1) . '1', $h);
+        $xml .= '</row>';
 
-    private static function writeStyles(string $dir): void
-    {
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' . "\n";
-        $xml .= '  <fonts count="1"><font><name val="Calibri"/><sz val="11"/></font></fonts>' . "\n";
-        $xml .= '  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' . "\n";
-        $xml .= '  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' . "\n";
-        $xml .= '  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' . "\n";
-        $xml .= '  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' . "\n";
-        $xml .= '  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' . "\n";
-        $xml .= '  <dxfs count="0"/>' . "\n";
-        $xml .= '  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>' . "\n";
-        $xml .= '</styleSheet>';
-        file_put_contents($dir . '/xl/styles.xml', $xml);
-    }
-
-    private static function writeSheet(string $dir, array $records, array $columns): void
-    {
-        @mkdir($dir . '/xl/worksheets');
-
-        $maxRow = count($records) + 1;
-        $maxCol = count($columns);
-        $lastCol = self::columnLetter($maxCol);
-
-        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
-        $xml .= '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' . "\n";
-        $xml .= "  <dimension ref=\"A1:{$lastCol}{$maxRow}\"/>\n";
-        $xml .= '  <cols><col min="1" max="' . $maxCol . '" width="22"/></cols>' . "\n";
-        $xml .= '  <sheetData>' . "\n";
-
-        $xml .= '    <row r="1">' . "\n";
-        foreach ($columns as $idx => $header) {
-            $col = self::columnLetter($idx + 1);
-            $xml .= self::inlineStrCell("{$col}1", $header);
-        }
-        $xml .= '    </row>' . "\n";
-
-        foreach ($records as $rIdx => $record) {
-            $rowNum = $rIdx + 2;
-            $xml .= "    <row r=\"{$rowNum}\">\n";
-            foreach ($columns as $idx => $key) {
-                $col = self::columnLetter($idx + 1);
-                $ref = "{$col}{$rowNum}";
-                $value = $record[$key] ?? '';
-                if ($key === 'id' && is_numeric($value)) {
-                    $xml .= "      <c r=\"{$ref}\"><v>" . (int)$value . "</v></c>\n";
-                } else {
-                    $xml .= self::inlineStrCell($ref, (string)$value);
-                }
+        foreach ($records as $ri => $rec) {
+            $rn = $ri + 2;
+            $xml .= "<row r=\"$rn\">";
+            foreach ($columns as $i => $key) {
+                $ref = self::col($i + 1) . $rn;
+                $val = $rec[$key] ?? '';
+                $xml .= ($key === 'id' && is_numeric($val))
+                    ? "<c r=\"$ref\"><v>" . (int)$val . "</v></c>"
+                    : self::cell($ref, (string)$val);
             }
-            $xml .= '    </row>' . "\n";
+            $xml .= '</row>';
         }
+        $xml .= '</sheetData></worksheet>';
+        file_put_contents("$dir/xl/worksheets/sheet1.xml", $xml);
 
-        $xml .= '  </sheetData>' . "\n";
-        $xml .= '</worksheet>';
-        file_put_contents($dir . '/xl/worksheets/sheet1.xml', $xml);
-    }
-
-    private static function inlineStrCell(string $ref, string $value): string
-    {
-        $escaped = htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
-        return "      <c r=\"{$ref}\" t=\"inlineStr\"><is><t>{$escaped}</t></is></c>\n";
-    }
-
-    private static function columnLetter(int $n): string
-    {
-        $result = '';
-        while ($n > 0) {
-            $n--;
-            $result = chr(65 + $n % 26) . $result;
-            $n = (int)($n / 26);
-        }
-        return $result;
-    }
-
-    private static function zipDirectory(string $source, string $out): void
-    {
         $zip = new ZipArchive();
-        if ($zip->open($out, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new Exception("Cannot open {$out} for writing");
+        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $src = rtrim($dir, '/');
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, RecursiveDirectoryIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if ($file->isDir()) continue;
+            $rel = substr($file->getRealPath(), strlen($src) + 1);
+            $zip->addFile($file->getRealPath(), str_replace('\\', '/', $rel));
         }
-
-        $source = rtrim($source, DIRECTORY_SEPARATOR);
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($source, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($iterator as $file) {
-            $realPath = $file->getRealPath();
-            $relative = substr($realPath, strlen($source) + 1);
-            if ($file->isDir()) {
-                continue;
-            }
-            $zip->addFile($realPath, str_replace('\\', '/', $relative));
-        }
-
         $zip->close();
-    }
 
-    private static function recursiveRemove(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            return;
-        }
-        $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($files as $file) {
-            if ($file->isDir()) {
-                rmdir($file->getRealPath());
-            } else {
-                unlink($file->getRealPath());
-            }
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($it as $file) {
+            $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
         }
         rmdir($dir);
     }
-}
 
-// MAIN EXECUTION
-$parser = new DocxParser();
-$records = [];
-
-echo PHP_EOL . "📄 Processing single document..." . PHP_EOL . PHP_EOL;
-
-// CREATE BACKUP FOLDER
-$backupFolder = $folder . '/backup';
-if (!is_dir($backupFolder)) {
-    mkdir($backupFolder, 0777, true);
-}
-
-// CHECK IF HARDCODED OR AUTO-DETECT
-if (!empty($HARDCODED_DOCUMENT_NAME)) {
-    // HARDCODED MODE
-    $file = $folder . '/docx/' . $HARDCODED_DOCUMENT_NAME;
-
-    if (!file_exists($file)) {
-        die("❌ File not found: " . $file . PHP_EOL);
-    }
-
-    $actualDocumentName = basename($file);
-
-    echo "📖 Parsing (Hardcoded): " . $actualDocumentName . PHP_EOL;
-    echo "   📂 Category (Selected): " . $HARDCODED_CATEGORY . PHP_EOL;
-
-} else {
-    // AUTO-DETECT MODE
-    $files = glob($folder . '/docx/*.docx');
-
-    if (count($files) === 0) {
-        die("❌ No .docx file found in folder: $folder/docx" . PHP_EOL);
-    }
-
-    // Sort by modification time — newest last
-    usort($files, function ($a, $b) {
-        return filemtime($a) - filemtime($b);
-    });
-
-    // If more than 1 file, move old ones to backup
-    if (count($files) > 1) {
-        echo "📦 Moving old files to backup folder..." . PHP_EOL;
-
-        for ($i = 0; $i < count($files) - 1; $i++) {
-            $oldFile = $files[$i];
-            $backupFile = $backupFolder . '/' . basename($oldFile);
-
-            if (file_exists($backupFile)) {
-                $timestamp = date('Ymd_His');
-                $backupFile = $backupFolder . '/' . pathinfo($oldFile, PATHINFO_FILENAME) . '_' . $timestamp . '.' . pathinfo($oldFile, PATHINFO_EXTENSION);
-            }
-
-            rename($oldFile, $backupFile);
-            echo "   📦 Moved: " . basename($oldFile) . " → backup/" . basename($backupFile) . PHP_EOL;
+    private static function cell(string $ref, string $value): string
+    {
+        if (mb_strlen($value) > EXCEL_CELL_LIMIT) {
+            $value = mb_substr($value, 0, EXCEL_CELL_LIMIT - 20) . "\n...[truncated]";
         }
-        echo PHP_EOL;
+        $v = htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+        return "<c r=\"$ref\" t=\"inlineStr\"><is><t xml:space=\"preserve\">$v</t></is></c>";
     }
 
-    // Get newest file
-    $files = glob($folder . '/docx/*.docx');
-    usort($files, function ($a, $b) {
-        return filemtime($a) - filemtime($b);
-    });
-    $file = end($files);
-    $actualDocumentName = basename($file);
-
-    echo "📖 Parsing (Auto-Detect): " . $actualDocumentName . PHP_EOL;
-    echo "   📂 Category (Selected): " . $HARDCODED_CATEGORY . PHP_EOL;
+    private static function col(int $n): string
+    {
+        $s = '';
+        while ($n > 0) { $n--; $s = chr(65 + $n % 26) . $s; $n = intdiv($n, 26); }
+        return $s;
+    }
 }
 
-// SET OUTPUT PATH — USE THE DOCX NAME
-$docxBaseName = pathinfo($actualDocumentName, PATHINFO_FILENAME);
-$outputPath = $folder . '/' . $docxBaseName . '.xlsx';
+// Pick file
+$backupDir = $folder . '/backup';
+if (!is_dir($backupDir)) mkdir($backupDir, 0777, true);
 
-// AUTO-DETECT VERSION FROM FILENAME
-$detectedVersion = autoDetectVersion($actualDocumentName);
-echo "   📅 Version (Auto-Detected): " . $detectedVersion . PHP_EOL;
+if ($hardcodedDocument !== '') {
 
-// PROCESS THE FILE
-$chunks = $parser->parse($file, $actualDocumentName, $HARDCODED_CATEGORY, $detectedVersion);
-echo "   ✅ " . count($chunks) . " chunks extracted" . PHP_EOL;
+   // Use the hardcoded one
+    $file = $folder . '/docx/' . $hardcodedDocument;
+    if (!file_exists($file)) die("❌ File not found: $file\n");
+    echo "📖 Parsing: " . basename($file) . " (hardcoded)\n";
+} else {
 
-$records = array_merge($records, $chunks);
-
-// Add ID numbers
-foreach ($records as $idx => &$record) {
-    $record['id'] = $idx + 1;
+    // Pick the newest .docx, move all others to /backup
+    $files = glob($folder . '/docx/*.docx') ?: [];
+    if (!$files) die("❌ No .docx files in $folder/docx\n");
+    usort($files, fn($a, $b) => filemtime($a) - filemtime($b));
+    while (count($files) > 1) {
+        $old = array_shift($files);
+        $dest = $backupDir . '/' . basename($old);
+        if (file_exists($dest)) $dest = $backupDir . '/' . pathinfo($old, PATHINFO_FILENAME) . '_' . date('Ymd_His') . '.docx';
+        rename($old, $dest);
+        echo "📦 Moved to backup: " . basename($old) . "\n";
+    }
+    $file = $files[0];
+    echo "📖 Parsing: " . basename($file) . " (newest)\n";
 }
-unset($record);
 
-echo PHP_EOL . "📊 Total: " . count($records) . " chunks extracted" . PHP_EOL . PHP_EOL;
+$docName = basename($file);
+$version = detectVersion($docName);
+echo "📂 Category: $category\n📅 Version: $version\n";
 
-// SAVE TO EXCEL
-echo "💾 Saving to Excel..." . PHP_EOL;
-XlsxExporter::write($records, $outputPath, $COLUMNS);
-echo "✅ Excel saved to: " . $outputPath . PHP_EOL;
+// Parse
+$parser = new DocxParser();
+$chunks = $parser->parse($file, $docName, $category, $version);
+echo "✅ Extracted " . count($chunks) . " chunks\n";
 
-// SAVE TO MySQL DATABASE
-echo PHP_EOL . "🗄️ Saving to MySQL database..." . PHP_EOL;
+//Debug dump
+if ($debug) {
+    $dump = "=== DOCUMENT: $docName ===\n\nTotal chunks: " . count($chunks) . "\n\n";
+
+    // List every word/*.xml file and count how many <w:t> nodes it has
+    $zip = new ZipArchive();
+    if ($zip->open($file) === true) {
+        $dump .= "=== RAW XML PARTS ===\n\n";
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (!preg_match('#^word/.*\.xml$#', $name)) continue;
+            $xml = $zip->getFromName($name);
+            $count = preg_match_all('/<w:t[^>]*>([^<]*)<\/w:t>/', $xml, $m);
+            $dump .= sprintf("%-40s   %d <w:t> text nodes\n", $name, $count);
+        }
+        $zip->close();
+    }
+
+    $dump .= "\n=== EXTRACTED CHUNKS ===\n\n";
+    foreach ($chunks as $i => $c) {
+        $len = strlen($c['chunk_text']);
+        $dump .= "#" . ($i + 1) . "  Section: {$c['section']}\n";
+        $dump .= "    Text ($len bytes):\n";
+        $body = $c['chunk_text'] === '' ? '   [EMPTY]' : '   ' . str_replace("\n", "\n   ", substr($c['chunk_text'], 0, 500));
+        $dump .= $body . "\n\n";
+    }
+    file_put_contents($folder . '/debug_dump.txt', $dump);
+    echo "🔍 Debug dump written to debug_dump.txt\n";
+}
+
+foreach ($chunks as $i => &$c) $c['id'] = $i + 1;
+unset($c);
+
+$output = $folder . '/' . pathinfo($docName, PATHINFO_FILENAME) . '.xlsx';
+Xlsx::write($chunks, $output, $columns);
+echo "💾 Excel: $output\n";
 
 try {
-    $db = new DatabaseExporter(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-    $count = $db->save($records);
+    $db = new DbWriter();
+    $removed = $db->deleteDocument($docName);
+    if ($removed) echo "🧹 Removed $removed old rows\n";
+    $saved = $db->save($chunks);
     $db->close();
-    echo "✅ " . $count . " records saved to MySQL database '" . DB_NAME . "'!" . PHP_EOL;
-    echo "   📍 phpMyAdmin: http://localhost/phpmyadmin" . PHP_EOL;
-} catch (Exception $e) {
-    echo "❌ Error saving to MySQL: " . $e->getMessage() . PHP_EOL;
-    echo "   ⚠️ Your data was still saved to Excel!" . PHP_EOL;
+    echo "🗄️ Saved $saved rows to MySQL\n";
+} catch (Throwable $e) {
+    echo "❌ DB error: {$e->getMessage()}\n   (Excel was still written)\n";
 }
 
-echo PHP_EOL . "✅ ALL DONE!" . PHP_EOL . PHP_EOL;
+echo "✅ Done\n";
