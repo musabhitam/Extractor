@@ -69,7 +69,6 @@ body{
   scroll-behavior:smooth;
   transition:background 0.4s ease, color 0.4s ease;
 
-  /* Scan-line effect */
   background-image:
     repeating-linear-gradient(
       0deg,
@@ -90,42 +89,61 @@ code{
   border:1px solid var(--border);
 }
 
-/*THEME TRANS*/
-
-body *{
-  transition:background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+/* FIXED: Removed the global "body *" transition block that caused
+   newly-rendered folder items to sit invisible until a forced reflow.
+   Theme transitions are now scoped to elements that actually change. */
+body,
+.nav,
+.section,
+.divider,
+.alert,
+.upload-box,
+.upload-box__icon,
+.upload-box__text,
+.upload-box__hint,
+.upload-select__input,
+.btn-primary,
+.btn-action,
+.folder,
+.folder__head,
+.folder__dot,
+.folder__item,
+.folder__link,
+.folder__search-input,
+.folder__checkbox-label,
+.folder__checkbox-label input,
+.folder__check input,
+.data-table th,
+.data-table td,
+.modal__content,
+.modal__close,
+.modal__tag,
+.footer,
+.footer__col a,
+.theme-toggle,
+.theme-toggle__icon{
+  transition:background-color .3s ease, border-color .3s ease, color .3s ease;
 }
 
 /*ENTRANCE ANIMATIONS*/
-
 @keyframes fadeInUp{
-  from{
-    opacity:0;
-    transform:translateY(24px);
-  }
-  to{
-    opacity:1;
-    transform:translateY(0);
-  }
+  from{ opacity:0; transform:translateY(24px); }
+  to{ opacity:1; transform:translateY(0); }
 }
-
 @keyframes fadeIn{
   from{opacity:0}
   to{opacity:1}
 }
-
 @keyframes blink{
   0%,100%{opacity:1}
   50%{opacity:0.2}
 }
-
 @keyframes pulse{
   0%,100%{transform:scale(1)}
   50%{transform:scale(1.05)}
 }
 
 /*NAV*/
-
 .nav{
   position:fixed;
   top:0;left:0;right:0;
@@ -152,9 +170,7 @@ body *{
   color:var(--accent);
   transition:letter-spacing .3s ease;
 }
-.nav__logo:hover{
-  letter-spacing:0.1em;
-}
+.nav__logo:hover{ letter-spacing:0.1em; }
 .nav__logo::before{
   content:'►';
   color:var(--accent);
@@ -209,7 +225,6 @@ body *{
 }
 
 /*THEME TOGGLE*/
-
 .theme-toggle{
   width:46px;
   height:46px;
@@ -266,7 +281,6 @@ body *{
 }
 
 /*HERO*/
-
 .hero{
   padding:220px 40px 140px;
   max-width:1200px;
@@ -274,9 +288,7 @@ body *{
   animation:fadeInUp .8s ease both;
   overflow:hidden;
 }
-.hero__inner{
-  max-width:820px;
-}
+.hero__inner{ max-width:820px; }
 .hero__title{
   font-size:clamp(2.25rem, 5vw, 4.5rem);
   font-weight:400;
@@ -294,9 +306,7 @@ body *{
   text-underline-offset:8px;
   transition:color .3s ease;
 }
-.hero__title em:hover{
-  color:var(--accent-dim);
-}
+.hero__title em:hover{ color:var(--accent-dim); }
 .hero__lead{
   font-size:1.05rem;
   color:var(--text-muted);
@@ -316,7 +326,6 @@ body *{
 }
 
 /*SECTION*/
-
 .section{
   padding:140px 40px;
   position:relative;
@@ -371,7 +380,6 @@ body *{
 }
 
 /*DIVIDER*/
-
 .divider{
   height:1px;
   background:var(--divider);
@@ -380,7 +388,6 @@ body *{
 }
 
 /*ALERT*/
-
 .alert{
   padding:18px 22px;
   border-radius:3px;
@@ -412,7 +419,6 @@ body *{
 }
 
 /*UPLOAD FORM*/
-
 .upload-form{
   display:flex;
   flex-direction:column;
@@ -444,18 +450,14 @@ body *{
   background:linear-gradient(180deg, transparent, rgba(255,159,74,0.05), transparent);
   transition:top 1s ease;
 }
-.upload-box:hover::before{
-  top:100%;
-}
+.upload-box:hover::before{ top:100%; }
 .upload-box:hover{
   border-color:var(--accent);
   background:var(--bg-hover);
   transform:translateY(-2px);
   box-shadow:0 12px 32px -12px rgba(255,159,74,0.3);
 }
-.upload-box input[type="file"]{
-  display:none;
-}
+.upload-box input[type="file"]{ display:none; }
 .upload-box__icon{
   width:56px;height:56px;
   border-radius:4px;
@@ -491,9 +493,7 @@ body *{
   border-color:var(--success);
   background:rgba(142,208,88,0.05);
 }
-.upload-box.has-file .upload-box__text{
-  color:var(--success);
-}
+.upload-box.has-file .upload-box__text{ color:var(--success); }
 .upload-box.has-file .upload-box__icon{
   border-color:var(--success);
   color:var(--success);
@@ -501,7 +501,6 @@ body *{
 }
 
 /*BUTTONS*/
-
 .btn-primary{
   display:inline-flex;
   align-items:center;
@@ -535,14 +534,17 @@ body *{
 .btn-primary span{
   transition:transform .3s cubic-bezier(.22,1,.36,1);
 }
-.btn-primary:hover span{
-  transform:translateX(6px);
-}
+.btn-primary:hover span{ transform:translateX(6px); }
 
-/*DATA TABLE*/
-
+/* ============================================================
+   FIXED: DATA TABLE
+   - .table-wrap now uses overflow-x:hidden (no horizontal scrollbar)
+   - .data-table now uses table-layout:fixed so the 8 columns share
+     the available width evenly instead of pushing off-screen
+   - cells wrap long text with word-break
+   ============================================================ */
 .table-wrap{
-  overflow-x:auto;
+  overflow-x:hidden;
   border:2px solid var(--border);
   border-radius:4px;
   background:var(--bg-elev);
@@ -550,14 +552,14 @@ body *{
   max-width:100%;
   min-width:0;
 }
-.table-wrap:hover{
-  border-color:var(--border-strong);
-}
+.table-wrap:hover{ border-color:var(--border-strong); }
+
 .data-table{
   width:100%;
   border-collapse:collapse;
   font-size:0.9rem;
   font-family:'JetBrains Mono',monospace;
+  table-layout:fixed;
 }
 .data-table th{
   text-align:left;
@@ -571,6 +573,8 @@ body *{
   border-bottom:2px solid var(--border);
   font-weight:700;
   white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .data-table td{
   padding:14px 20px;
@@ -578,13 +582,12 @@ body *{
   border-bottom:1px solid var(--border);
   vertical-align:top;
   line-height:1.7;
+  overflow-wrap:break-word;
+  word-break:break-word;
 }
-.data-table tr:last-child td{
-  border-bottom:none;
-}
+.data-table tr:last-child td{ border-bottom:none; }
 
 /*DATA ROW CLICKABLE*/
-
 .data-row{
   cursor:pointer;
   transition:background .2s ease, transform .2s ease;
@@ -595,7 +598,6 @@ body *{
 }
 
 /*FOLDER*/
-
 .folders{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -622,21 +624,15 @@ body *{
   border-bottom:1px dashed var(--border);
   transition:border-color .3s ease;
 }
-.folder__head:hover{
-  border-bottom-color:var(--accent);
-}
+.folder__head:hover{ border-bottom-color:var(--accent); }
 .folder__dot{
   width:10px;height:10px;
   background:var(--accent);
   transition:transform .3s ease;
   flex-shrink:0;
 }
-.folder__head:hover .folder__dot{
-  transform:scale(1.3);
-}
-.folder__dot--muted{
-  background:var(--text-faint);
-}
+.folder__head:hover .folder__dot{ transform:scale(1.3); }
+.folder__dot--muted{ background:var(--text-faint); }
 .folder__title{
   font-family:'JetBrains Mono',monospace;
   font-size:13px;
@@ -653,8 +649,8 @@ body *{
   min-width:0;
 }
 
-/*FOLDER ITEM + CHECKBOX*/
-
+/* FIXED: folder item — no more transition:all, no more overflow:hidden,
+   so long filenames render immediately and wrap instead of vanishing */
 .folder__item{
   display:flex;
   align-items:center;
@@ -665,10 +661,10 @@ body *{
   border-radius:3px;
   font-size:0.88rem;
   color:var(--text-muted);
-  transition:all .3s cubic-bezier(.22,1,.36,1);
-  overflow:hidden;
+  transition:background-color .3s ease, border-color .3s ease;
   min-width:0;
   max-width:100%;
+  overflow:visible;
 }
 .folder__item:hover{
   background:var(--bg-hover);
@@ -681,7 +677,6 @@ body *{
 }
 
 /*FOLDER LINK (clickable file)*/
-
 .folder__link{
   flex:1;
   min-width:0;
@@ -689,10 +684,11 @@ body *{
   transition:color .2s ease;
   cursor:pointer;
   text-decoration:none;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
   font-family:'JetBrains Mono',monospace;
+  white-space:normal;
+  overflow-wrap:break-word;
+  word-break:break-word;
+  overflow:visible;
 }
 .folder__link:hover{
   color:var(--accent);
@@ -702,7 +698,6 @@ body *{
 }
 
 /*FOLDER SUBHEAD*/
-
 .folder__subhead{
   display:flex;
   align-items:center;
@@ -710,7 +705,6 @@ body *{
   margin-top:36px;
   margin-bottom:18px;
 }
-
 .folder__subtitle{
   font-family:'JetBrains Mono',monospace;
   font-size:13px;
@@ -721,11 +715,7 @@ body *{
 }
 
 /*FOLDER SEARCH*/
-
-.folder__search{
-  margin-bottom:18px;
-}
-
+.folder__search{ margin-bottom:18px; }
 .folder__search-input{
   width:100%;
   padding:12px 16px;
@@ -738,9 +728,7 @@ body *{
   outline:none;
   transition:all .3s cubic-bezier(.22,1,.36,1);
 }
-.folder__search-input::placeholder{
-  color:var(--text-faint);
-}
+.folder__search-input::placeholder{ color:var(--text-faint); }
 .folder__search-input:focus{
   border-color:var(--accent);
   background:var(--bg-hover);
@@ -756,7 +744,6 @@ body *{
 }
 
 /*BULK ACTION BAR*/
-
 .folder__actions{
   display:flex;
   align-items:center;
@@ -773,7 +760,6 @@ body *{
 }
 
 /*RETRO SELECT ALL CHECKBOX*/
-
 .folder__checkbox-label{
   display:inline-flex;
   align-items:center;
@@ -844,7 +830,6 @@ body *{
 }
 
 /*CHECKBOX ON EACH ITEM*/
-
 .folder__check{
   display:flex;
   align-items:center;
@@ -889,7 +874,6 @@ body *{
 }
 
 /*ACTION BUTTONS*/
-
 .btn-action{
   padding:8px 16px;
   border-radius:3px;
@@ -928,7 +912,6 @@ body *{
 }
 
 /*MODAL*/
-
 .modal{
   position:fixed;
   inset:0;
@@ -939,9 +922,7 @@ body *{
   padding:24px;
   overflow:hidden;
 }
-.modal.is-open{
-  display:flex;
-}
+.modal.is-open{ display:flex; }
 .modal__backdrop{
   position:absolute;
   inset:0;
@@ -997,9 +978,7 @@ body *{
   color:var(--accent);
   margin-bottom:18px;
 }
-.modal__eyebrow::before{
-  content:'// ';
-}
+.modal__eyebrow::before{ content:'// '; }
 .modal__title{
   font-size:clamp(1.35rem, 2.5vw, 1.85rem);
   font-weight:400;
@@ -1069,37 +1048,22 @@ body *{
   border-color:var(--accent);
 }
 
-/*MODAL ANIMATIONS*/
-
 @keyframes fadeIn{
   from{opacity:0}
   to{opacity:1}
 }
 @keyframes slideUp{
-  from{
-    opacity:0;
-    transform:translateY(20px);
-  }
-  to{
-    opacity:1;
-    transform:translateY(0);
-  }
+  from{ opacity:0; transform:translateY(20px); }
+  to{ opacity:1; transform:translateY(0); }
 }
 
-/*PREVENT SCROLL WHEN MODAL OPEN*/
-
-body.modal-open{
-  overflow:hidden;
-}
+body.modal-open{ overflow:hidden; }
 
 @media(max-width:768px){
-  .modal__content{
-    padding:40px 24px 32px;
-  }
+  .modal__content{ padding:40px 24px 32px; }
 }
 
 /*FOOTER*/
-
 .footer{
   padding:80px 40px 40px;
   border-top:2px solid var(--border);
@@ -1123,9 +1087,7 @@ body.modal-open{
   margin-bottom:18px;
   color:var(--accent);
 }
-.footer__brand h4::before{
-  content:'$ ';
-}
+.footer__brand h4::before{ content:'$ '; }
 .footer__brand p{
   font-size:0.9rem;
   color:var(--text-muted);
@@ -1140,9 +1102,7 @@ body.modal-open{
   color:var(--text-faint);
   margin-bottom:22px;
 }
-.footer__col h5::before{
-  content:'> ';
-}
+.footer__col h5::before{ content:'> '; }
 .footer__col ul{
   list-style:none;
   display:flex;
@@ -1184,8 +1144,7 @@ body.modal-open{
   .footer{padding:60px 24px 30px}
 }
 
-/*UPLOAD SELECT (category dropdown)*/
-
+/* FIXED: upload select was 100px, now 100% */
 .upload-select{
   display:flex;
   flex-direction:column;
