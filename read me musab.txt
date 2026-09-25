@@ -19,6 +19,8 @@ docx/           → Current uploaded .docx file
 backup/         → Old .docx and .xlsx files
 knowledge_base_output.xlsx → Latest Excel output
 
+Supposedly after run it will auto create backup/ folder
+
 
 HOW TO USE
 1. Start XAMPP (Apache + MySQL)
